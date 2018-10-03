@@ -362,7 +362,10 @@ public class SocksSocket extends Socket {
 
   @Override
   public synchronized void close() throws IOException {
-    proxy.getProxySocket().close();
+    Socket proxySocket=proxy.getProxySocket();
+    if(proxySocket!=null){
+      proxySocket.close();
+    }
     proxy.setProxySocket(null);
   }
 
