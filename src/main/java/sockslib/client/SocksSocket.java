@@ -391,7 +391,11 @@ public class SocksSocket extends Socket {
 
   @Override
   public boolean isClosed() {
-    return proxy.getProxySocket().isClosed();
+    Socket proxySocket=proxy.getProxySocket();
+    if(proxySocket==null){
+      return true;
+    }
+    return proxySocket.isClosed();
   }
 
   @Override
