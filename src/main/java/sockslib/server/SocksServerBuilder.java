@@ -61,7 +61,7 @@ public class SocksServerBuilder {
 	 * @param socksHandlerClass <code>java.lang.Class<? extends {@link SocksHandler}</code>
 	 *                          instance.
 	 */
-	private SocksServerBuilder(Class<? extends SocksHandler> socksHandlerClass) {
+	protected SocksServerBuilder(Class<? extends SocksHandler> socksHandlerClass) {
 		this.socksHandlerClass = checkNotNull(socksHandlerClass, "Argument [socksHandlerClass] may not be null");
 		userManager = new MemoryBasedUserManager();
 	}
