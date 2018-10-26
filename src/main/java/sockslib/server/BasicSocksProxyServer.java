@@ -26,6 +26,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -34,9 +36,10 @@ import java.util.concurrent.Executors;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
- * The class <code>BasicSocksProxyServer</code> is a implementation of {@link SocksProxyServer}
- * .<br>
+ * The class <code>BasicSocksProxyServer</code> is a implementation of
+ * {@link SocksProxyServer} .<br>
  * You can build a SOCKS5 server easily by following codes:<br>
+ * 
  * <pre>
  * ProxyServer proxyServer = new BasicSocksProxyServer(Socks5Handler.class);
  * proxyServer.start(); // Create a SOCKS5 server bind at 1080.
@@ -44,6 +47,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * <p>
  * If you want change the port, you can using following codes:
  * </p>
+ * 
  * <pre>
  * proxyServer.start(9999);
  * </pre>
@@ -54,333 +58,353 @@ import static com.google.common.base.Preconditions.checkNotNull;
  */
 public class BasicSocksProxyServer implements SocksProxyServer, Runnable {
 
-  protected static final Logger logger = LoggerFactory.getLogger(BasicSocksProxyServer.class);
+	protected static final Logger logger = LoggerFactory.getLogger(BasicSocksProxyServer.class);
 
-  /**
-   * Number of threads in thread pool.
-   */
-  protected static final int THREAD_NUMBER = 100;
+	/**
+	 * Number of threads in thread pool.
+	 */
+	protected static final int THREAD_NUMBER = 100;
 
-  /**
-   * Thread pool used to process each connection.
-   */
-  private ExecutorService executorService;
+	/**
+	 * Thread pool used to process each connection.
+	 */
+	private ExecutorService executorService;
 
-  /**
-   * Session manager
-   */
-  private SessionManager sessionManager = new BasicSessionManager();
+	/**
+	 * Session manager
+	 */
+	private SessionManager sessionManager = new BasicSessionManager();
 
-  /**
-   * The next session's ID.
-   */
-  private long nextSessionId = 0;
+	/**
+	 * The next session's ID.
+	 */
+	private long nextSessionId = 0;
 
-  /**
-   * Server socket.
-   */
-  private ServerSocket serverSocket;
+	/**
+	 * Server socket.
+	 */
+	private ServerSocket serverSocket;
 
-  /**
-   * SOCKS socket handler class.
-   */
-  private Class<? extends SocksHandler> socksHandlerClass;
+	/**
+	 * SOCKS socket handler class.
+	 */
+	private Class<? extends SocksHandler> socksHandlerClass;
 
-  /**
-   * Sessions that server managed.
-   */
-  private Map<Long, Session> sessions;
+	/**
+	 * Sessions that server managed.
+	 */
+	private Map<Long, Session> sessions;
 
-  /**
-   * A flag.
-   */
-  private boolean stop = false;
+	/**
+	 * A flag.
+	 */
+	private boolean stop = false;
 
-  /**
-   * Thread that start the server.
-   */
-  private Thread thread;
+	/**
+	 * Thread that start the server.
+	 */
+	private Thread thread;
 
-  /**
-   * Timeout for a session.
-   */
-  private int timeout = 10000;
+	/**
+	 * Timeout for a session.
+	 */
+	private int timeout = 10000;
 
-  private boolean daemon = false;
+	private boolean daemon = false;
 
-  /**
-   * Method selector.
-   */
-  private MethodSelector methodSelector = new SocksMethodSelector();
+	/**
+	 * Method selector.
+	 */
+	private MethodSelector methodSelector = new SocksMethodSelector();
 
-  /**
-   * Buffer size.
-   */
-  private int bufferSize = 1024 * 1024 * 5;
+	/**
+	 * Buffer size.
+	 */
+	private int bufferSize = 1024 * 1024 * 5;
 
-  private int bindPort = DEFAULT_SOCKS_PORT;
+	private int bindPort = DEFAULT_SOCKS_PORT;
 
-  private InetAddress bindAddr;
+	private InetAddress bindAddr;
 
-  private SocksProxy proxy;
+	private SocksProxy proxy;
 
-  private NetworkMonitor networkMonitor = new NetworkMonitor();
+	private NetworkMonitor networkMonitor = new NetworkMonitor();
 
-  private PipeInitializer pipeInitializer;
+	private PipeInitializer pipeInitializer;
 
-  /**
-   * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class. The bind port is
-   * 1080.
-   *
-   * @param socketHandlerClass {@link SocksHandler} class.
-   */
-  public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass) {
-    this(socketHandlerClass, DEFAULT_SOCKS_PORT, Executors.newFixedThreadPool(THREAD_NUMBER));
-  }
+	/**
+	 * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class.
+	 * The bind port is 1080.
+	 *
+	 * @param socketHandlerClass {@link SocksHandler} class.
+	 */
+	public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass) {
+		this(socketHandlerClass, DEFAULT_SOCKS_PORT, Executors.newFixedThreadPool(THREAD_NUMBER));
+	}
 
-  /**
-   * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class and a port.
-   *
-   * @param socketHandlerClass {@link SocksHandler} class.
-   * @param port               The port that SOCKS server will listen.
-   */
-  public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, int port) {
-    this(socketHandlerClass, port, Executors.newFixedThreadPool(THREAD_NUMBER));
-  }
+	/**
+	 * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class
+	 * and a port.
+	 *
+	 * @param socketHandlerClass {@link SocksHandler} class.
+	 * @param port               The port that SOCKS server will listen.
+	 */
+	public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, int port) {
+		this(socketHandlerClass, port, Executors.newFixedThreadPool(THREAD_NUMBER));
+	}
 
-  /**
-   * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class and a
-   * ExecutorService.
-   *
-   * @param socketHandlerClass {@link SocksHandler} class.
-   * @param executorService    Thread pool.
-   */
-  public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, ExecutorService
-      executorService) {
-    this(socketHandlerClass, DEFAULT_SOCKS_PORT, executorService);
-  }
+	/**
+	 * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class
+	 * and a ExecutorService.
+	 *
+	 * @param socketHandlerClass {@link SocksHandler} class.
+	 * @param executorService    Thread pool.
+	 */
+	public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, ExecutorService executorService) {
+		this(socketHandlerClass, DEFAULT_SOCKS_PORT, executorService);
+	}
 
-  /**
-   * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class , a port and a
-   * ExecutorService.
-   *
-   * @param socketHandlerClass {@link SocksHandler} class.
-   * @param port               The port that SOCKS server will listen.
-   * @param executorService    Thread pool.
-   */
-  public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, int port,
-                               ExecutorService executorService) {
-    this.socksHandlerClass =
-        checkNotNull(socketHandlerClass, "Argument [socksHandlerClass] may not be null");
-    this.executorService =
-        checkNotNull(executorService, "Argument [executorService] may not be null");
-    this.bindPort = port;
-    sessions = new HashMap<>();
-  }
+	/**
+	 * Constructs a {@link BasicSocksProxyServer} by a {@link SocksHandler} class ,
+	 * a port and a ExecutorService.
+	 *
+	 * @param socketHandlerClass {@link SocksHandler} class.
+	 * @param port               The port that SOCKS server will listen.
+	 * @param executorService    Thread pool.
+	 */
+	public BasicSocksProxyServer(Class<? extends SocksHandler> socketHandlerClass, int port,
+			ExecutorService executorService) {
+		this.socksHandlerClass = checkNotNull(socketHandlerClass, "Argument [socksHandlerClass] may not be null");
+		this.executorService = checkNotNull(executorService, "Argument [executorService] may not be null");
+		this.bindPort = port;
+		sessions = new HashMap<>();
+	}
 
-  @Override
-  public void run() {
-    logger.info("Start proxy server at port:{}", bindPort);
-    while (!stop) {
-      try {
-        Socket socket = serverSocket.accept();
-        socket = processSocketBeforeUse(socket);
-        socket.setSoTimeout(timeout);
-        Session session = sessionManager.newSession(socket);
-        SocksHandler socksHandler = createSocksHandler();
-        /* initialize socks handler */
-        socksHandler.setSession(session);
-        initializeSocksHandler(socksHandler);
+	@Override
+	public void run() {
+		logger.info("Start proxy server at port:{}", bindPort);
+		while (!Thread.currentThread().isInterrupted() && !this.stop) {
+			try {
+				Socket socket = acceptSocket();
+				if (socket == null) {
+					continue;
+				}
+				Socket socket = serverSocket.accept();
+				socket = processSocketBeforeUse(socket);
+				socket.setSoTimeout(timeout);
+				Session session = sessionManager.newSession(socket);
+				SocksHandler socksHandler = createSocksHandler();
+				/* initialize socks handler */
+				socksHandler.setSession(session);
+				initializeSocksHandler(socksHandler);
 
-        executorService.execute(socksHandler);
+				executorService.execute(socksHandler);
 
-      } catch (IOException e) {
-        // Catches the exception that cause by shutdown method.
-        if (e.getMessage().equals("Socket closed") && stop) {
-          logger.debug("Server shutdown");
-          return;
-        }
-        logger.debug(e.getMessage(), e);
-      }
-    }
-  }
+			} catch (IOException e) {
+				// Catches the exception that cause by shutdown method.
+				if (e.getMessage().equals("Socket closed") && stop) {
+					logger.debug("Server shutdown");
+					return;
+				}
+				logger.debug(e.getMessage(), e);
+			}
+		}
+	}
 
-  @Override
-  public void shutdown() {
-    stop = true;
-    executorService.shutdown();
-    if (thread != null) {
-      thread.interrupt();
-    }
-    try {
-      closeAllSession();
-      if (serverSocket != null && serverSocket.isBound()) {
-        serverSocket.close();
-      }
-    } catch (IOException e) {
-      logger.error(e.getMessage(), e);
-    }
-  }
+	@Override
+	public void shutdown() {
+		stop = true;
+		executorService.shutdown();
+		if (thread != null) {
+			thread.interrupt();
+		}
+		try {
+			closeAllSession();
+			if (serverSocket != null && serverSocket.isBound()) {
+				serverSocket.close();
+			}
+		} catch (IOException e) {
+			logger.error(e.getMessage(), e);
+		}
+	}
 
-  @Override
-  public void start() throws IOException {
-    serverSocket = createServerSocket(bindPort, bindAddr);
-    thread = new Thread(this);
-    thread.setName("fs-thread");
-    thread.setDaemon(daemon);
-    thread.start();
-  }
+	@Override
+	public void start() throws IOException {
+		serverSocket = createServerSocket(bindPort, bindAddr);
+		thread = new Thread(this);
+		thread.setName("fs-thread");
+		thread.setDaemon(daemon);
+		thread.start();
+	}
 
-  protected ServerSocket createServerSocket(int bindPort, InetAddress bindAddr) throws IOException {
-    return new ServerSocket(bindPort, 50, bindAddr);
-  }
+	@Override
+	protected ServerSocket createServerSocket(int bindPort, InetAddress bindAddr) throws IOException {
+		ServerSocket ss = new ServerSocket(bindPort, 50, bindAddr);
+		int timeoutMilli = ((Long) Math.min(Integer.MAX_VALUE, Duration.ofSeconds(1).toMillis())).intValue();
+		ss.setSoTimeout(timeoutMilli);
+		return ss;
+	}
 
-  @Override
-  public SocksHandler createSocksHandler() {
-    try {
-      return socksHandlerClass.newInstance();
-    } catch (InstantiationException | IllegalAccessException e) {
-      logger.error(e.getMessage(), e);
-    }
-    return null;
-  }
+	protected Socket acceptSocket() throws IOException {
+		while (!Thread.currentThread().isInterrupted() && !this.stop) {
+			try {
+				return this.getServerSocket().accept();
+			} catch (SocketTimeoutException e) {
+				// suppress;
+			}
+		}
+		return null;
+	}
 
-  @Override
-  public void initializeSocksHandler(SocksHandler socksHandler) {
-    socksHandler.setMethodSelector(methodSelector);
-    socksHandler.setBufferSize(bufferSize);
-    socksHandler.setProxy(proxy);
-    socksHandler.setSocksProxyServer(this);
-  }
+	public ServerSocket getServerSocket() {
+		return this.serverSocket;
+	}
 
-  /**
-   * Closes all sessions.
-   */
-  protected void closeAllSession() {
-    for (long key : sessions.keySet()) {
-      sessions.get(key).close();
-    }
+	@Override
+	public SocksHandler createSocksHandler() {
+		try {
+			return socksHandlerClass.newInstance();
+		} catch (InstantiationException | IllegalAccessException e) {
+			logger.error(e.getMessage(), e);
+		}
+		return null;
+	}
 
-  }
+	@Override
+	public void initializeSocksHandler(SocksHandler socksHandler) {
+		socksHandler.setMethodSelector(methodSelector);
+		socksHandler.setBufferSize(bufferSize);
+		socksHandler.setProxy(proxy);
+		socksHandler.setSocksProxyServer(this);
+	}
 
-  public ExecutorService getExecutorService() {
-    return executorService;
-  }
+	/**
+	 * Closes all sessions.
+	 */
+	protected void closeAllSession() {
+		for (long key : sessions.keySet()) {
+			sessions.get(key).close();
+		}
 
-  public void setExecutorService(ExecutorService executorService) {
-    this.executorService = executorService;
-  }
+	}
 
-  private synchronized long getNextSessionId() {
-    nextSessionId++;
-    return nextSessionId;
-  }
+	public ExecutorService getExecutorService() {
+		return executorService;
+	}
 
-  @Override
-  public Map<Long, Session> getManagedSessions() {
-    return sessions;
-  }
+	public void setExecutorService(ExecutorService executorService) {
+		this.executorService = executorService;
+	}
 
-  @Override
-  public void setSupportMethods(SocksMethod... methods) {
-    methodSelector.setSupportMethod(methods);
+	private synchronized long getNextSessionId() {
+		nextSessionId++;
+		return nextSessionId;
+	}
 
-  }
+	@Override
+	public Map<Long, Session> getManagedSessions() {
+		return sessions;
+	}
 
-  @Override
-  public int getTimeout() {
-    return timeout;
-  }
+	@Override
+	public void setSupportMethods(SocksMethod... methods) {
+		methodSelector.setSupportMethod(methods);
 
+	}
 
-  @Override
-  public void setTimeout(int timeout) {
-    this.timeout = timeout;
-  }
+	@Override
+	public int getTimeout() {
+		return timeout;
+	}
 
-  @Override
-  public int getBufferSize() {
-    return bufferSize;
-  }
+	@Override
+	public void setTimeout(int timeout) {
+		this.timeout = timeout;
+	}
 
-  @Override
-  public void setBufferSize(int bufferSize) {
-    this.bufferSize = bufferSize;
-  }
+	@Override
+	public int getBufferSize() {
+		return bufferSize;
+	}
 
-  @Override
-  public SocksProxy getProxy() {
-    return proxy;
-  }
+	@Override
+	public void setBufferSize(int bufferSize) {
+		this.bufferSize = bufferSize;
+	}
 
-  @Override
-  public void setProxy(SocksProxy proxy) {
-    this.proxy = proxy;
-  }
+	@Override
+	public SocksProxy getProxy() {
+		return proxy;
+	}
 
-  @Override
-  public InetAddress getBindAddr() {
-    return bindAddr;
-  }
+	@Override
+	public void setProxy(SocksProxy proxy) {
+		this.proxy = proxy;
+	}
 
-  @Override
-  public void setBindAddr(InetAddress bindAddr) {
-    this.bindAddr = bindAddr;
-  }
+	@Override
+	public InetAddress getBindAddr() {
+		return bindAddr;
+	}
 
-  @Override
-  public int getBindPort() {
-    return bindPort;
-  }
+	@Override
+	public void setBindAddr(InetAddress bindAddr) {
+		this.bindAddr = bindAddr;
+	}
 
-  @Override
-  public void setBindPort(int bindPort) {
-    this.bindPort = bindPort;
-  }
+	@Override
+	public int getBindPort() {
+		return bindPort;
+	}
 
-  @Override
-  public boolean isDaemon() {
-    return daemon;
-  }
+	@Override
+	public void setBindPort(int bindPort) {
+		this.bindPort = bindPort;
+	}
 
-  @Override
-  public void setDaemon(boolean daemon) {
-    this.daemon = daemon;
-  }
+	@Override
+	public boolean isDaemon() {
+		return daemon;
+	}
 
-  public Thread getServerThread() {
-    return thread;
-  }
+	@Override
+	public void setDaemon(boolean daemon) {
+		this.daemon = daemon;
+	}
 
-  public NetworkMonitor getNetworkMonitor() {
-    return networkMonitor;
-  }
+	public Thread getServerThread() {
+		return thread;
+	}
 
-  public void setNetworkMonitor(NetworkMonitor networkMonitor) {
-    this.networkMonitor = checkNotNull(networkMonitor);
-  }
+	public NetworkMonitor getNetworkMonitor() {
+		return networkMonitor;
+	}
 
-  protected Socket processSocketBeforeUse(Socket socket) {
-    return new MonitorSocketWrapper(socket, networkMonitor);
-  }
+	public void setNetworkMonitor(NetworkMonitor networkMonitor) {
+		this.networkMonitor = checkNotNull(networkMonitor);
+	}
 
-  @Override
-  public SessionManager getSessionManager() {
-    return sessionManager;
-  }
+	protected Socket processSocketBeforeUse(Socket socket) {
+		return new MonitorSocketWrapper(socket, networkMonitor);
+	}
 
-  @Override
-  public void setSessionManager(SessionManager sessionManager) {
-    this.sessionManager = sessionManager;
-  }
+	@Override
+	public SessionManager getSessionManager() {
+		return sessionManager;
+	}
 
-  @Override
-  public PipeInitializer getPipeInitializer() {
-    return pipeInitializer;
-  }
+	@Override
+	public void setSessionManager(SessionManager sessionManager) {
+		this.sessionManager = sessionManager;
+	}
 
-  @Override
-  public void setPipeInitializer(PipeInitializer pipeInitializer) {
-    this.pipeInitializer = pipeInitializer;
-  }
+	@Override
+	public PipeInitializer getPipeInitializer() {
+		return pipeInitializer;
+	}
+
+	@Override
+	public void setPipeInitializer(PipeInitializer pipeInitializer) {
+		this.pipeInitializer = pipeInitializer;
+	}
 }
