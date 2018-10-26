@@ -237,6 +237,15 @@ public class SocksServerBuilder {
     this.sslConfiguration = sslConfiguration;
     return this;
   }
+  
+	protected SocksProxyServer generateSocksProxyServer(Class<? extends SocksHandler> socksHandlerClass,
+			SSLConfiguration sslConfiguration) {
+		if (sslConfiguration == null) {
+			return new BasicSocksProxyServer(socksHandlerClass);
+		} else {
+			return new SSLSocksProxyServer(socksHandlerClass, sslConfiguration);
+		}
+	}
 
   /**
    * Builds a {@link SocksProxyServer} instance.
@@ -244,13 +253,8 @@ public class SocksServerBuilder {
    * @return instance of {@link SocksProxyServer}.
    */
   public SocksProxyServer build() {
-    SocksProxyServer proxyServer = null;
-    if (sslConfiguration == null) {
-      proxyServer = new BasicSocksProxyServer(socksHandlerClass);
-    } else {
-      proxyServer = new SSLSocksProxyServer(socksHandlerClass, sslConfiguration);
-    }
-    proxyServer.setTimeout(timeout);
+    SocksProxyServer proxyServer = generateSocksProxyServer(this.socksHandlerClass, this.sslConfiguration);
+	proxyServer.setTimeout(timeout);
     proxyServer.setBindAddr(bindAddr);
     proxyServer.setBindPort(bindPort);
     proxyServer.setDaemon(daemon);
