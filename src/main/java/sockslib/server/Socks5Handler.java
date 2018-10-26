@@ -185,7 +185,7 @@ public class Socks5Handler implements SocksHandler {
     pipe.start(); // This method will build tow thread to run tow internal pipes.
 
     // wait for pipe exit.
-    while (pipe.isRunning()) {
+    while (!Thread.currentThread().isInterrupted() && pipe.isRunning()) {
       try {
         Thread.sleep(idleTime);
       } catch (InterruptedException e) {
@@ -218,7 +218,7 @@ public class Socks5Handler implements SocksHandler {
     pipe.start();
 
     // wait for pipe exit.
-    while (pipe.isRunning()) {
+    while (!Thread.currentThread().isInterrupted() && pipe.isRunning()) {
       try {
         Thread.sleep(idleTime);
       } catch (InterruptedException e) {
@@ -242,7 +242,7 @@ public class Socks5Handler implements SocksHandler {
         .getSocketAddress());
     session.write(new CommandResponseMessage(VERSION, ServerReply.SUCCEEDED, InetAddress
         .getLocalHost(), socketAddress.getPort()));
-    while (udpRelayServer.isRunning()) {
+    while (!Thread.currentThread().isInterrupted() && udpRelayServer.isRunning()) {
       try {
         Thread.sleep(idleTime);
       } catch (InterruptedException e) {
