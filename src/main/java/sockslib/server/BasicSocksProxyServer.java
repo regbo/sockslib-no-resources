@@ -189,7 +189,6 @@ public class BasicSocksProxyServer implements SocksProxyServer, Runnable {
 				if (socket == null) {
 					continue;
 				}
-				Socket socket = serverSocket.accept();
 				socket = processSocketBeforeUse(socket);
 				socket.setSoTimeout(timeout);
 				Session session = sessionManager.newSession(socket);
